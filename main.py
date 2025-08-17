@@ -1,6 +1,8 @@
 #Import modules
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QApplication,QWidget,QFormLayout,QVBoxLayout,QHBoxLayout,QLabel,QPushButton,QLineEdit,QComboBox,QRadioButton,QButtonGroup,QProgressBar
+from PyQt5.QtWidgets import QFileDialog
+from PyQt5.QtGui import QPixmap
 import yt_dlp
 
 class App(QWidget):
@@ -8,14 +10,30 @@ class App(QWidget):
     def __init__(self):
         super().__init__()
 
-        self.setWindowTitle("YouTube Downloader")
+        self.setWindowTitle("ytDownloader By KevalG69")
         self.resize(500,350)
 
         self.master_layout = QVBoxLayout()
+        #loader
+        self.loader_label = QLabel()
+        self.loader_label.setAlignment(Qt.AlignCenter)
+        
+            #hide loader
+        self.loader_label.hide()
+
+        #setting gif in the loader label
+        self.pixmap = QPixmap("waiting.jpg")
+        self.sizeAdjustedPixmap = self.pixmap.scaled(180,120,Qt.KeepAspectRatio,Qt.SmoothTransformation)
+
+        self.loader_label.setPixmap(self.sizeAdjustedPixmap)
+        
 
         #creating form 
         self.form_layout = QFormLayout()
         self.form_layout.setLabelAlignment(Qt.AlignRight)
+
+        #adding loader to the top of the form
+        self.form_layout.addRow(self.loader_label)
 
         #creating labels
         self.url_label = QLabel("Video URL :")
@@ -114,10 +132,12 @@ class App(QWidget):
         self.progress_row.addStretch(1)
         self.progress_row.addWidget(self.download_progress)
         self.progress_row.addWidget(self.progress_label)
-        self.progress_label.font
+        
         self.download_progress.setMinimumWidth(468)
         self.progress_row.addStretch(1)
 
+        self.download_progress.setVisible(False)
+        self.progress_label.setVisible(False)
 
         self.form_layout.addRow(self.progress_row)        
 
@@ -233,46 +253,54 @@ class App(QWidget):
     #function to get the format and quality available in video
     def get_format_of_video(self,url):
 
-        #tell yt_dl to send all formats
-        #create dictionary of options
-        ydl_options = {"listformats":True}
+        try:
 
-        with yt_dlp.YoutubeDL(ydl_options) as ydl:
+            #tell yt_dl to send all formats
+            #create dictionary of options
+            ydl_options = {"listformats":True}
+
+            with yt_dlp.YoutubeDL(ydl_options) as ydl:
+                
+                #extract info from api
+                info = ydl.extract_info(url,download=False)
+
+                #get formats if exist otherwise store empty array
+                formats = info.get("formats",[])
+
+                #storing formats
+                video_formats =[]
+                audio_formats =[]
+
+                #loop through all formats
+                for format in formats:
+                
+                    vcodec = format.get("vcodec")
+                    acodec = format.get("acodec")
+
+                    #if format is video
+                    if vcodec != "none":
+                        #get resolution
+                        resolution = format.get("format_note") or format.get("height")
+                        #get fps
+                        fps = format.get("fps")
+                        video_formats.append({
+                        "format_id": format["format_id"],
+                        "resolution": f"{resolution}p {fps}fps" if fps else f"{resolution}p",
+                        "ext": format["ext"],
+                        "filesize": format.get("filesize")
+                        })
             
-            #extract info from api
-            info = ydl.extract_info(url,download=False)
+                return video_formats
 
-            #get formats if exist otherwise store empty array
-            formats = info.get("formats",[])
-
-            #storing formats
-            video_formats =[]
-            audio_formats =[]
-
-            #loop through all formats
-            for format in formats:
-               
-                vcodec = format.get("vcodec")
-                acodec = format.get("acodec")
-
-                #if format is video
-                if vcodec != "none":
-                    #get resolution
-                    resolution = format.get("format_note") or format.get("height")
-                    #get fps
-                    fps = format.get("fps")
-                    video_formats.append({
-                    "format_id": format["format_id"],
-                    "resolution": f"{resolution}p {fps}fps" if fps else f"{resolution}p",
-                    "ext": format["ext"],
-                    "filesize": format.get("filesize")
-                    })
-           
-            return video_formats
-
+        except yt_dlp.utils.DownloadError as error:
+            print("Donwload Error :",error)
+            return []
+    
+        except Exception as error:
+            print("Error while getting formats : ",error)
+            return []
     #function when radio is selected
-    def on_radio_change(self):
-        
+    def on_radio_change(self):     
         #get url 
         url = self.url_input.text().strip()
 
@@ -284,9 +312,14 @@ class App(QWidget):
         #clear quality combobox
         self.quality_combobox.clear()
 
+        #show loading
+        self.loader_label.show()
+
+        QApplication.processEvents()  # force GUI update
         #get video and audio formats
         video_formats = self.get_format_of_video(url)
 
+        self.loader_label.hide()
         print(video_formats)
         if self.video_radio.isChecked():
             print("video")
@@ -297,7 +330,7 @@ class App(QWidget):
             self.quality_label.setVisible(True)
             self.quality_combobox.setVisible(True)
 
-           
+            
             #loop through format and add items to quality combobox
             for format in video_formats:
                 self.quality_combobox.addItem(f"{format['resolution']} ({format['ext']})",format["format_id"])
@@ -311,6 +344,7 @@ class App(QWidget):
             self.format_label.setVisible(True)
             self.format_combobox.setVisible(True)
 
+    
 
     
 
