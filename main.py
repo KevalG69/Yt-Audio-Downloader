@@ -1,7 +1,7 @@
 #Import modules
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QApplication,QWidget,QFormLayout,QVBoxLayout,QHBoxLayout,QLabel,QPushButton,QLineEdit,QComboBox,QRadioButton,QButtonGroup,QProgressBar
-from PyQt5.QtWidgets import QFileDialog
+from PyQt5.QtWidgets import QFileDialog,QMessageBox
 from PyQt5.QtGui import QPixmap
 import yt_dlp
 
@@ -160,6 +160,11 @@ class App(QWidget):
             #when text in input changes
         self.url_input.textChanged.connect(self.on_radio_change)
 
+            #when browse button clicked
+        self.browse_button.clicked.connect(self.browse_folder)
+
+            #when donwload clicked
+        self.download_button.clicked.connect(self.download)
 
         self.format_label.setVisible(False)
         self.format_combobox.setVisible(False)
@@ -299,6 +304,107 @@ class App(QWidget):
         except Exception as error:
             print("Error while getting formats : ",error)
             return []
+   
+    #function for when browse folder to select donwload location
+    def browse_folder(self):
+        #show select folder dialog and get path of selected folder
+        folder = QFileDialog.getExistingDirectory(self,"Select Donwload Folder")
+
+        if folder:
+            self.location_input.setText(folder)
+
+
+    #progress bar function
+    def progress_hook(self,d):
+        
+        if d["status"] == "downloading":
+            total = d.get('total_bytes') or d.get('total_bytes_estimate')
+            downloaded = d.get("downloaded_bytes",0)
+            
+            if total:
+                self.download_progress.setVisible(True)
+                self.progress_label.setVisible(True)
+                percent = int(downloaded/total*100)
+                self.download_progress.setValue(percent)
+                self.progress_label.setText(f"{percent}%")
+        elif d["status"] == "finished":
+            self.download_progress.setValue(100)
+            self.progress_label.setText("Completed!")
+
+    #function to donwload selected formate
+    def download(self):
+
+
+        #get url
+        url = self.url_input.text().strip()
+
+        #saving location
+        save_path = self.location_input.text().strip()
+
+        if not url:
+            QMessageBox.warning(self,"Warning","Please Enter URL")
+            return 
+        
+        if not save_path:
+            QMessageBox.warning(self,"Warning","Select Donwload Location")
+            return 
+        
+
+        self.loader_label.show()
+        QApplication.processEvents()
+        #download video if selected
+        if self.video_radio.isChecked():
+
+            #get formate id
+            format_id = self.quality_combobox.currentData()
+            #create yt_dl options
+            ydl_options = {
+                "format":format_id,
+                "outtmpl":f"{save_path}/$(title)s.$(ext)s",
+                "noplaylist":True
+            }
+
+        elif self.audio_radio.isChecked():
+            #get audio format selected
+            audio_format = self.format_combobox.currentText().lower()
+
+            #mp3 requires postprocessors
+            postprocessors = []
+
+            if audio_format != "original (best)":
+                postprocessors = [{
+                    "key":"FFmpegExtractAudio",
+                    "preferredcodec":audio_format,
+                    "preferredquality":"192"
+                }]
+
+
+            #creating yt_dl options
+            ydl_options = {
+                "format":"bestaudio/best",
+                "outtmpl":f"{save_path}/%(title)s.%(ext)s",
+                "noplaylist":True,
+                "postprocessors":postprocessors
+            }
+
+        try:
+           
+            with yt_dlp.YoutubeDL(ydl_options) as ydl:
+                self.download_button.setEnabled(False)
+                ydl.download([url])
+                self.loader_label.hide()
+                QMessageBox.information(self,"Success","Donwload Completed")
+        
+        except Exception as error:
+            self.loader_label.hide()
+            QMessageBox.critical(self,"Error",f"Failed to donwload:\n{str(error)}")
+
+        finally:
+            self.download_button.setEnabled(True)
+
+           
+       
+
     #function when radio is selected
     def on_radio_change(self):     
         #get url 
@@ -343,6 +449,7 @@ class App(QWidget):
             #show formate
             self.format_label.setVisible(True)
             self.format_combobox.setVisible(True)
+
 
     
 
