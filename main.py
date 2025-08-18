@@ -11,30 +11,49 @@ class App(QWidget):
         super().__init__()
 
         self.setWindowTitle("ytDownloader By KevalG69")
-        self.resize(500,350)
+        self.resize(500,250)
 
         self.master_layout = QVBoxLayout()
         #loader
-        self.loader_label = QLabel()
-        self.loader_label.setAlignment(Qt.AlignCenter)
-        
-            #hide loader
-        self.loader_label.hide()
 
-        #setting gif in the loader label
+            #creating overlay to cover whole window
+        self.overlay = QWidget(self)
+            #setting style
+        self.overlay.setStyleSheet("background-color: rgba(0, 0, 0, 190); font-weight:bold;")
+
+            #cover whole window
+      
+            #block other input
+        self.overlay.setAttribute(Qt.WA_TransparentForMouseEvents,False)
+
+            #inside overlay
+        self.layout = QVBoxLayout(self.overlay)
+        self.layout.setAlignment(Qt.AlignCenter)
+
+        self.loader_label = QLabel()
+        self.loader_text = QLabel("Wait while we are stealing from the cloud...")
+        self.loader_label.setAlignment(Qt.AlignCenter)
+        self.loader_text.setAlignment(Qt.AlignCenter)
+    
+            #setting gif in the loader label
         self.pixmap = QPixmap("waiting.jpg")
         self.sizeAdjustedPixmap = self.pixmap.scaled(180,120,Qt.KeepAspectRatio,Qt.SmoothTransformation)
-
         self.loader_label.setPixmap(self.sizeAdjustedPixmap)
         
+            #setting loader to ther overlay
+        self.layout.addWidget(self.loader_label)
+        self.layout.addWidget(self.loader_text)
+        
+        
+            #hide overlay
+        self.overlay.hide()
+
 
         #creating form 
         self.form_layout = QFormLayout()
         self.form_layout.setLabelAlignment(Qt.AlignRight)
 
-        #adding loader to the top of the form
-        self.form_layout.addRow(self.loader_label)
-
+     
         #creating labels
         self.url_label = QLabel("Video URL :")
         self.type_label = QLabel("Type :")
@@ -169,6 +188,8 @@ class App(QWidget):
         self.format_label.setVisible(False)
         self.format_combobox.setVisible(False)
 
+
+        self.overlay.setGeometry(self.rect())
         #set to main layout
         self.setLayout(self.form_layout) 
 
@@ -247,7 +268,7 @@ class App(QWidget):
                 background-color: #1db954;
                 border-radius: 6px;
             }
-
+           
         """)
 
 
@@ -330,6 +351,10 @@ class App(QWidget):
         elif d["status"] == "finished":
             self.download_progress.setValue(100)
             self.progress_label.setText("Completed!")
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self.overlay:
+            self.overlay.setGeometry(self.rect())
 
     #function to donwload selected formate
     def download(self):
@@ -350,7 +375,8 @@ class App(QWidget):
             return 
         
 
-        self.loader_label.show()
+        self.overlay.show()
+        self.overlay.raise_()
         QApplication.processEvents()
         #download video if selected
         if self.video_radio.isChecked():
@@ -360,7 +386,7 @@ class App(QWidget):
             #create yt_dl options
             ydl_options = {
                 "format":format_id,
-                "outtmpl":f"{save_path}/$(title)s.$(ext)s",
+                "outtmpl":f"{save_path}/%(title)s.%(ext)s",
                 "noplaylist":True
             }
 
@@ -392,7 +418,8 @@ class App(QWidget):
             with yt_dlp.YoutubeDL(ydl_options) as ydl:
                 self.download_button.setEnabled(False)
                 ydl.download([url])
-                self.loader_label.hide()
+                self.overlay.hide()
+                
                 QMessageBox.information(self,"Success","Donwload Completed")
         
         except Exception as error:
@@ -419,13 +446,16 @@ class App(QWidget):
         self.quality_combobox.clear()
 
         #show loading
-        self.loader_label.show()
+        self.overlay.show()
+        self.overlay.raise_()
 
         QApplication.processEvents()  # force GUI update
         #get video and audio formats
         video_formats = self.get_format_of_video(url)
 
-        self.loader_label.hide()
+        self.overlay.hide()
+        
+
         print(video_formats)
         if self.video_radio.isChecked():
             print("video")
