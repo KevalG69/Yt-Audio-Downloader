@@ -1,9 +1,17 @@
 #Import modules
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt,QObject,pyqtSignal,QThread
 from PyQt5.QtWidgets import QApplication,QWidget,QFormLayout,QVBoxLayout,QHBoxLayout,QLabel,QPushButton,QLineEdit,QComboBox,QRadioButton,QButtonGroup,QProgressBar
 from PyQt5.QtWidgets import QFileDialog,QMessageBox
 from PyQt5.QtGui import QPixmap
+from yt_dlp.utils import DownloadError, ExtractorError
+import sys, os
 import yt_dlp
+
+
+def resource_path(relative_path):
+    """ Get absolute path to resource (works for dev and for PyInstaller exe) """
+    base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_path, relative_path)
 
 class App(QWidget):
 
@@ -14,21 +22,28 @@ class App(QWidget):
         self.resize(500,250)
 
         self.master_layout = QVBoxLayout()
+        self._max_percent = 0
         #loader
 
             #creating overlay to cover whole window
         self.overlay = QWidget(self)
+        self.overlay2 = QWidget(self)
             #setting style
         self.overlay.setStyleSheet("background-color: rgba(0, 0, 0, 190); font-weight:bold;")
+        self.overlay2.setStyleSheet("background-color: rgba(0, 0, 0, 190); font-weight:bold;")
 
             #cover whole window
       
             #block other input
         self.overlay.setAttribute(Qt.WA_TransparentForMouseEvents,False)
+        self.overlay2.setAttribute(Qt.WA_TransparentForMouseEvents,False)
 
             #inside overlay
         self.layout = QVBoxLayout(self.overlay)
+        self.layout2 = QVBoxLayout(self.overlay2)
+
         self.layout.setAlignment(Qt.AlignCenter)
+        self.layout2.setAlignment(Qt.AlignCenter)
 
         self.loader_label = QLabel()
         self.loader_text = QLabel("Wait while we are stealing from the cloud...")
@@ -36,7 +51,7 @@ class App(QWidget):
         self.loader_text.setAlignment(Qt.AlignCenter)
     
             #setting gif in the loader label
-        self.pixmap = QPixmap("waiting.jpg")
+        self.pixmap = QPixmap(resource_path("waiting.jpg"))
         self.sizeAdjustedPixmap = self.pixmap.scaled(180,120,Qt.KeepAspectRatio,Qt.SmoothTransformation)
         self.loader_label.setPixmap(self.sizeAdjustedPixmap)
         
@@ -147,18 +162,20 @@ class App(QWidget):
         self.form_layout.addRow(self.download_row)
 
             #progressbar
-        self.progress_row = QHBoxLayout()
-        self.progress_row.addStretch(1)
-        self.progress_row.addWidget(self.download_progress)
-        self.progress_row.addWidget(self.progress_label)
         
+        self.layout2.addStretch(1)
+        self.layout2.addWidget(self.download_progress)
+        self.layout2.addWidget(self.progress_label)
+        self.progress_label.setAlignment(Qt.AlignRight)
         self.download_progress.setMinimumWidth(468)
-        self.progress_row.addStretch(1)
+        self.layout2.addStretch(1)
 
         self.download_progress.setVisible(False)
         self.progress_label.setVisible(False)
 
-        self.form_layout.addRow(self.progress_row)        
+
+        self.overlay2.hide()
+        #adding progress bar to the layout       
 
         #adding all layout to master layout
         # self.master_layout.addLayout(self.url_row)
@@ -190,6 +207,7 @@ class App(QWidget):
 
 
         self.overlay.setGeometry(self.rect())
+        self.overlay2.setGeometry(self.rect())
         #set to main layout
         self.setLayout(self.form_layout) 
 
@@ -274,7 +292,7 @@ class App(QWidget):
 
         #adding event to the widgets
         
-
+   
 
     #function to get the format and quality available in video
     def get_format_of_video(self,url):
@@ -335,31 +353,22 @@ class App(QWidget):
             self.location_input.setText(folder)
 
 
-    #progress bar function
-    def progress_hook(self,d):
-        
-        if d["status"] == "downloading":
-            total = d.get('total_bytes') or d.get('total_bytes_estimate')
-            downloaded = d.get("downloaded_bytes",0)
-            
-            if total:
-                self.download_progress.setVisible(True)
-                self.progress_label.setVisible(True)
-                percent = int(downloaded/total*100)
-                self.download_progress.setValue(percent)
-                self.progress_label.setText(f"{percent}%")
-        elif d["status"] == "finished":
-            self.download_progress.setValue(100)
-            self.progress_label.setText("Completed!")
+       
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if self.overlay:
             self.overlay.setGeometry(self.rect())
+        
+        if self.overlay2:
+            self.overlay2.setGeometry(self.rect())
 
     #function to donwload selected formate
     def download(self):
-
-
+        if getattr(self, "is_downloading", False):
+            QMessageBox.warning(self, "Download in progress",
+                            "Please wait until the current download finishes.")
+            return
+        self.on_radio_change()
         #get url
         url = self.url_input.text().strip()
 
@@ -374,116 +383,269 @@ class App(QWidget):
             QMessageBox.warning(self,"Warning","Select Donwload Location")
             return 
         
-
-        self.overlay.show()
-        self.overlay.raise_()
-        QApplication.processEvents()
-        #download video if selected
+      
+      
         if self.video_radio.isChecked():
-
-            #get formate id
-            format_id = self.quality_combobox.currentData()
-            #create yt_dl options
-            ydl_options = {
-                "format":format_id,
-                "outtmpl":f"{save_path}/%(title)s.%(ext)s",
-                "noplaylist":True
-            }
+            isVideo = True
+            format_info = self.quality_combobox.currentData()
 
         elif self.audio_radio.isChecked():
-            #get audio format selected
-            audio_format = self.format_combobox.currentText().lower()
-
-            #mp3 requires postprocessors
-            postprocessors = []
-
-            if audio_format != "original (best)":
-                postprocessors = [{
-                    "key":"FFmpegExtractAudio",
-                    "preferredcodec":audio_format,
-                    "preferredquality":"192"
-                }]
-
-
-            #creating yt_dl options
-            ydl_options = {
-                "format":"bestaudio/best",
-                "outtmpl":f"{save_path}/%(title)s.%(ext)s",
-                "noplaylist":True,
-                "postprocessors":postprocessors
-            }
-
-        try:
-           
-            with yt_dlp.YoutubeDL(ydl_options) as ydl:
-                self.download_button.setEnabled(False)
-                ydl.download([url])
-                self.overlay.hide()
-                
-                QMessageBox.information(self,"Success","Donwload Completed")
+            isVideo = False
+            format_info = (self.format_combobox.currentText() or "").strip().lower()
         
-        except Exception as error:
-            self.loader_label.hide()
-            QMessageBox.critical(self,"Error",f"Failed to donwload:\n{str(error)}")
+        self._max_percent = 0
+        #create thread
+        self.thread = QThread(self)
+        #create worker object
+        self.worker = DownloadWorker(url,save_path,format_info,isVideo)
+        #move worker to the thread
+        self.worker.moveToThread(self.thread)
 
-        finally:
-            self.download_button.setEnabled(True)
 
-           
+        #connect signals
+            #when thread started
+        self.thread.started.connect(self.worker.run)
+            #when thread emit progress signal
+        self.worker.progress.connect(self.update_progress_bar)
+            #when thread emit finished signal
+        self.worker.finished.connect(self.worker_finished)
+            #when thread emit error signal
+        self.worker.error.connect(self.worker_error)
+
+        
+        #cleanup
+            #when worker finish
+        self.worker.finished.connect(self.thread.quit)
+        self.worker.error.connect(self.thread.quit)
+            #delete worker object
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.worker.error.connect(self.worker.deleteLater)
+
+        self.thread.finished.connect(self.thread.deleteLater)
+ 
+
+
+        # reset flag when thread finishes
+        self.thread.finished.connect(lambda: setattr(self, "is_downloading", False))
+
+        # mark as downloading
+        self.is_downloading = True
+    
+        #show progress bar
+        self.download_progress.setValue(0)
+        self.download_progress.show()
+        self.progress_label.setText("-")
+        self.progress_label.show()
+        self.overlay2.show()
+        self.overlay2.raise_()
+        QApplication.processEvents()
+
+        #start thread
+        self.thread.start()
+
+        #disable    
+        self.download_button.setEnabled(False)
+
+    #function for updating progress bar
+    def update_progress_bar(self,percent,speed_str,eta_str):
+        self.download_progress.setValue(percent)
+        self.progress_label.setText(f"{speed_str} | {eta_str}")
+        self._max_percent = max(self._max_percent, percent)
+        self.download_progress.setValue(self._max_percent)
+
+    def worker_finished(self,message):
+        self.download_progress.hide()
+        self.progress_label.hide()
+        self.overlay2.hide()
+        self.download_button.setEnabled(True)
+        QMessageBox.information(self,"Success",message)
        
+        
+    def worker_error(self,errorMessage):
+        self.download_progress.hide()
+        self.progress_label.hide()
+        self.overlay2.hide()
+        self.download_button.setEnabled(True)
+        QMessageBox.critical(self,"Error",errorMessage)
+       
+
+    #delete thread when app closed
+    def closeEvent(self, e):
+        if hasattr(self, "thread") and self.thread and self.thread.isRunning():
+            self.worker.error.disconnect() if hasattr(self.worker, "error") else None
+            self.thread.requestInterruption()  # optional if you implement it
+            self.thread.quit()
+            self.thread.wait()
+            e.accept()
 
     #function when radio is selected
     def on_radio_change(self):     
-        #get url 
-        url = self.url_input.text().strip()
 
-        #if no url found then return
-        if not url:
-            return
+        try:
+            #get url 
+            url = self.url_input.text().strip()
+
+            #if no url found then return
+            if not url:
+                return
 
 
-        #clear quality combobox
-        self.quality_combobox.clear()
+            #clear quality combobox
+            self.quality_combobox.clear()
 
-        #show loading
-        self.overlay.show()
-        self.overlay.raise_()
+            #show loading
+            self.overlay.show()
+            self.overlay.raise_()
 
-        QApplication.processEvents()  # force GUI update
-        #get video and audio formats
-        video_formats = self.get_format_of_video(url)
+            QApplication.processEvents()  # force GUI update
+            #get video and audio formats
+            video_formats = self.get_format_of_video(url)
 
-        self.overlay.hide()
+            self.overlay.hide()
+            
+
+            print(video_formats)
+            if self.video_radio.isChecked():
+                print("video")
+                #hide formate field when video is selected
+                self.format_label.setVisible(False)
+                self.format_combobox.setVisible(False)
+                #show quality field
+                self.quality_label.setVisible(True)
+                self.quality_combobox.setVisible(True)
+
+                
+                #loop through format and add items to quality combobox
+                for format in (video_formats or []):
+                    self.quality_combobox.addItem(f"{format['resolution']} ({format['ext']})",format["format_id"])
+
+            elif self.audio_radio.isChecked():
+                print("audio")
+                #hide quality 
+                self.quality_label.setVisible(False)
+                self.quality_combobox.setVisible(False)
+                #show formate
+                self.format_label.setVisible(True)
+                self.format_combobox.setVisible(True)
+
+        except Exception as e:
+            QMessageBox.critical(self,"Error","Unexpected Error")
+            self.overlay.hide()
+
+class DownloadWorker(QObject):
+
+    #emit progress percent
+    progress = pyqtSignal(int,str,str)
+    #emit finshed signal
+    finished = pyqtSignal(str)
+    #emit if error
+    error = pyqtSignal(str)
+
+    def __init__(self,url,save_path,format_info,isVideo):
+        super().__init__()
+        self.url = url
+        self.save_path = save_path
+        self.format_info = format_info
+        self.isVideo = isVideo
         
 
-        print(video_formats)
-        if self.video_radio.isChecked():
-            print("video")
-            #hide formate field when video is selected
-            self.format_label.setVisible(False)
-            self.format_combobox.setVisible(False)
-            #show quality field
-            self.quality_label.setVisible(True)
-            self.quality_combobox.setVisible(True)
+    
+    def run(self):
+        try:
+            if self.isVideo:
+                #create options for the ydl
+                ydl_options = {
+                    'outtmpl':f"{self.save_path}/%(title)s.%(ext)s",
+                    'format':self.format_info,
+                    'progress_hooks':[self.progress_hook],
+                    'quiet':True,
+                    'noprogress':True
+                }
 
+            elif not self.isVideo:
+                #mp3 required postprocessor
+                postprocessors = []
+
+                if self.format_info != "original (best)":
+                    postprocessors = [{
+                        "key":"FFmpegExtractAudio",
+                        "preferredcodec":self.format_info,
+                        "preferredquality":"192"
+                }]
+
+                 #creating yt_dl options
+                ydl_options = {
+                    "format":"bestaudio/best",
+                    "outtmpl":f"{self.save_path}/%(title)s.%(ext)s",
+                    "noplaylist":True,
+                    "postprocessors":postprocessors
+                }
+
+            #Call ydl api
+            with yt_dlp.YoutubeDL(ydl_options) as ydl:
+                #call download function written in the ydl object and pass url to download video
+                ydl.download([self.url])
+                self.finished.emit("Download Completed!")
+
+        
+        except DownloadError as e:
+            self.error.emit(f"Download error: {str(e)}")
+        except ExtractorError as e:
+            self.error.emit(f"Extractor error: {str(e)}")
+        except Exception as e:
+            self.error.emit(f"Unexpected error: {str(e)}")
             
-            #loop through format and add items to quality combobox
-            for format in video_formats:
-                self.quality_combobox.addItem(f"{format['resolution']} ({format['ext']})",format["format_id"])
-
-        elif self.audio_radio.isChecked():
-            print("audio")
-            #hide quality 
-            self.quality_label.setVisible(False)
-            self.quality_combobox.setVisible(False)
-            #show formate
-            self.format_label.setVisible(True)
-            self.format_combobox.setVisible(True)
-
-
     
+    def progress_hook(self,d):
 
-    
+        #if status is donwloading
+        if d["status"] == 'downloading':
+            #get total bytes to donwload
+            total = d.get('total_bytes') or d.get('total_bytes_estimate')
+            #get donwloaded bytes if there is no then store 0 
+            downloaded = d.get('downloaded_bytes',0)
+
+            #if total exist
+            if total and downloaded:
+                #calculate how many percent donwloaded
+                percent = int(downloaded/total * 100)
+                
+                #donwload speed
+                speed = d.get("speed") #bytes per second
+                eta = d.get("eta")#second
+
+                if speed:
+                    speed_str = f"{speed/1024:.1f} KB/s"
+
+                else:
+                    speed_str = "-"
+
+                if eta:
+                    
+                    #convert to the int
+                    eta = int(float(eta))
+                    
+                    #format time
+                    minutes,seconds = divmod(eta,60)
+                    
+                    if minutes:
+                        eta_str = f"{minutes}m {seconds}s"
+
+                    else:
+                        eta_str = f"{seconds}s"
+                else:
+                    eta_str = ""
+            
+
+                #emit progress percentage
+                self.progress.emit(percent,speed_str,eta_str)
+            
+        
+        #if status is finished
+        elif d['status'] == 'finished':
+            self.progress.emit(100,"0 KB/s","0s remaining")
+
+
 
 
 if __name__ == "__main__":
